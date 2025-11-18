@@ -18,6 +18,18 @@
 #include "./peer.h"
 #include "./common.h"
 
+
+#ifndef STATUS_FORBIDDEN
+#define STATUS_FORBIDDEN 4
+#endif
+
+
+typedef struct {
+    int sockfd;
+    char remote_ip[IP_LEN];
+    uint16_t remote_port;
+} PeerRequest_t;
+
 NetworkAddress_t *my_address; 
 char my_raw_password[PASSWORD_LEN];
 hashdata_t my_request_signature; 
@@ -52,7 +64,7 @@ int send_request(int sockfd, uint32_t command, const char *body, uint32_t body_l
 
     if (compsys_helper_writen(sockfd, &req_h, REQUEST_HEADER_LEN) == -1) return -1;
     if (body_len > 0 && body != NULL) {
-        if (compsys_helper_writen(sockfd, body, body_len) == -1) return -1;
+        if (compsys_helper_writen(sockfd, (void *)body, body_len) == -1) return -1;
     }
     return 0;
 }
@@ -75,7 +87,7 @@ int send_reply(int sockfd, uint32_t status, const char *body, uint32_t body_len,
 
     if (compsys_helper_writen(sockfd, &reply_h, REPLY_HEADER_LEN) == -1) return -1;
     if (body_len > 0 && body != NULL) {
-        if (compsys_helper_writen(sockfd, body, body_len) == -1) return -1;
+        if (compsys_helper_writen(sockfd, (void *)body, body_len) == -1) return -1;
     }
     return 0;
 }
@@ -375,7 +387,7 @@ int handle_retrieve(int sockfd, RequestHeader_t *req_h)
     }
 
     hashdata_t expected_signature;
-    calculate_signature(source_peer->signature, source_peer->salt, expected_signature);
+    calculate_signature((const char *)source_peer->signature, source_peer->salt, expected_signature);
     
     if (memcmp(req_h->signature, expected_signature, SHA256_HASH_SIZE) != 0) {
         pthread_mutex_unlock(&network_mutex);
@@ -449,6 +461,7 @@ int handle_inform(int sockfd, RequestHeader_t *req_h)
 
 void* handle_peer_request(void *socket_ptr)
 {
+    
     PeerRequest_t *req_info = (PeerRequest_t*)socket_ptr;
     int sockfd = req_info->sockfd;
     
@@ -543,12 +556,14 @@ void* server_thread()
         char *client_ip = inet_ntoa(cli_addr.sin_addr);
         uint16_t client_port = ntohs(cli_addr.sin_port);
         
+        
         PeerRequest_t *req_info = (PeerRequest_t*)malloc(sizeof(PeerRequest_t));
         if (!req_info) {
             close(connfd);
             continue;
         }
         req_info->sockfd = connfd;
+        
         memcpy(req_info->remote_ip, client_ip, IP_LEN);
         req_info->remote_port = client_port;
 
