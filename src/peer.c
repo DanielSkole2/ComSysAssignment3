@@ -55,7 +55,7 @@ int send_request(int sockfd, uint32_t command, const char *body, uint32_t body_l
     RequestHeader_t req_h;
     memset(&req_h, 0, sizeof(RequestHeader_t));
     
-    req_h.port = htobe32(my_address->port);
+    req_h.port = my_address->port;
     req_h.command = htobe32(command);
     req_h.length = htobe32(body_len);
 
@@ -246,8 +246,20 @@ int request_file(char *filename)
         return -1;
     }
     
-    srand(time(NULL));
-    NetworkAddress_t *target_peer = network[rand() % peer_count];
+    
+    NetworkAddress_t *target_peer = NULL;
+    for (uint32_t i = 0; i < peer_count; i++) {
+        if (be32toh(network[i]->port) == 12345) {
+            target_peer = network[i];
+            break;
+        }
+    }
+
+    if (target_peer == NULL) {
+        fprintf(stderr, ">> Cannot retrieve file: Target peer (12345) not found in network.\n");
+        pthread_mutex_unlock(&network_mutex);
+        return -1;
+    }
     pthread_mutex_unlock(&network_mutex);
 
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -264,7 +276,7 @@ int request_file(char *filename)
         return -1;
     }
 
-    if (send_request(sockfd, COMMAND_RETREIVE, filename, strlen(filename) + 1) == -1) {
+    if (send_request(sockfd, COMMAND_RETREIVE, filename, strlen(filename)) == -1) {
         close(sockfd);
         return -1;
     }
@@ -287,8 +299,10 @@ int request_file(char *filename)
         total_blocks = be32toh(reply_h.block_count);
 
         if (status != STATUS_OK) {
-            char *error_msg = (char*)malloc(len);
+            char *error_msg = (char*)malloc(len + 1);
+            memset(error_msg, 0, len + 1);
             if (len > 0) compsys_helper_readn(sockfd, error_msg, len);
+            fprintf(stderr, ">> Retrieval failed with status %u: %s\n", status, error_msg);
             free(error_msg);
             result = -1;
             break;
@@ -310,6 +324,8 @@ int request_file(char *filename)
         get_data_sha(data_block, calculated_block_hash, len, SHA256_HASH_SIZE);
         if (memcmp(calculated_block_hash, reply_h.block_hash, SHA256_HASH_SIZE) != 0) {
             fprintf(stderr, ">> Block %u hash mismatch.\n", block_num);
+            result = -1; 
+            break; 
         }
 
         fwrite(data_block, 1, len, file_out);
@@ -325,7 +341,14 @@ int request_file(char *filename)
         if (result == 0) {
             hashdata_t calculated_total_hash;
             get_file_sha(full_file_path, calculated_total_hash, SHA256_HASH_SIZE);
-            if (memcmp(calculated_total_hash, reply_h.total_hash, SHA256_HASH_SIZE) != 0) result = -1;
+            if (memcmp(calculated_total_hash, reply_h.total_hash, SHA256_HASH_SIZE) != 0) {
+                fprintf(stderr, ">> File hash mismatch for %s.\n", filename);
+                result = -1;
+            } else {
+                fprintf(stdout, ">> File '%s' successfully retrieved and verified.\n", filename);
+            }
+        } else {
+             fprintf(stderr, ">> File retrieval failed before verification.\n");
         }
     }
 
@@ -396,11 +419,12 @@ int handle_retrieve(int sockfd, RequestHeader_t *req_h)
     pthread_mutex_unlock(&network_mutex);
 
     uint32_t body_len = be32toh(req_h->length);
-    char *filename = (char*)malloc(body_len);
+    char *filename = (char*)malloc(body_len + 1); 
     if (compsys_helper_readn(sockfd, filename, body_len) == -1) {
         free(filename);
         return -1;
     }
+    filename[body_len] = '\0'; 
 
     FILE *file_in = fopen(filename, "rb");
     if (!file_in) {
@@ -489,12 +513,12 @@ void* client_thread()
 {
     char peer_ip[IP_LEN];
     fprintf(stdout, "Enter peer IP to connect to (or '0' for initial peer): ");
-    scanf("%16s", peer_ip);
+    scanf("%15s", peer_ip); 
 
     if (!string_equal(peer_ip, "0")) {
         char peer_port[PORT_STR_LEN];
         fprintf(stdout, "Enter peer port: ");
-        scanf("%16s", peer_port);
+        scanf("%15s", peer_port); 
 
         NetworkAddress_t peer_address_target;
         memset(&peer_address_target, 0, sizeof(NetworkAddress_t));
@@ -511,7 +535,7 @@ void* client_thread()
         char file_path[PATH_LEN];
         fprintf(stdout, "\n--- Network Peers: %u ---\n", peer_count);
         fprintf(stdout, "Enter file path to retrieve (or 'quit'): ");
-        scanf("%128s", file_path);
+        scanf("%127s", file_path); 
 
         if (string_equal(file_path, "quit")) break;
         request_file(file_path);
@@ -594,7 +618,7 @@ int main(int argc, char **argv)
     my_address->port = htobe32(my_address->port);
 
     fprintf(stdout, "Create a password: ");
-    scanf("%16s", my_raw_password);
+    scanf("%15s", my_raw_password); 
     for (int i=strlen(my_raw_password); i<PASSWORD_LEN; i++) my_raw_password[i] = '\0';
 
     char salt[SALT_LEN+1] = "0123456789ABCDEF\0";
