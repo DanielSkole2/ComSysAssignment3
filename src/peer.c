@@ -31,7 +31,7 @@ typedef struct {
 } PeerRequest_t;
 
 NetworkAddress_t *my_address; 
-char my_raw_password[PASSWORD_LEN];
+char my_raw_password[PASSWORD_LEN]; 
 hashdata_t my_request_signature; 
 
 NetworkAddress_t** network = NULL;
@@ -56,11 +56,11 @@ int send_request(int sockfd, uint32_t command, const char *body, uint32_t body_l
     memset(&req_h, 0, sizeof(RequestHeader_t));
     
     req_h.port = my_address->port;
-    req_h.command = htobe32(command);
+    req_h.command = htobe32(command); 
     req_h.length = htobe32(body_len);
 
     memcpy(req_h.ip, my_address->ip, IP_LEN);
-    memcpy(req_h.signature, my_request_signature, SHA256_HASH_SIZE);
+    memcpy(req_h.signature, my_request_signature, SHA256_HASH_SIZE); 
 
     if (compsys_helper_writen(sockfd, &req_h, REQUEST_HEADER_LEN) == -1) return -1;
     if (body_len > 0 && body != NULL) {
@@ -281,7 +281,7 @@ int request_file(char *filename)
         return -1;
     }
 
-    size_t file_total_size = 0;
+    
     uint32_t received_blocks = 0, total_blocks = 0;
     FILE *file_out = NULL;
     int result = 0;
@@ -308,9 +308,14 @@ int request_file(char *filename)
             break;
         }
 
-        if (block_num == 0) {
+        
+        if (file_out == NULL) {
             file_out = fopen(full_file_path, "wb");
-            if (!file_out) { result = -1; break; }
+            if (!file_out) { 
+                fprintf(stderr, ">> Error opening file for writing: %s\n", full_file_path);
+                result = -1; 
+                break; 
+            }
         }
         
         char *data_block = (char*)malloc(len);
@@ -328,8 +333,24 @@ int request_file(char *filename)
             break; 
         }
 
-        fwrite(data_block, 1, len, file_out);
-        file_total_size += len;
+        long offset = (long)block_num * MAX_PAYLOAD_SIZE;
+
+        if (fseek(file_out, offset, SEEK_SET) != 0) {
+            fprintf(stderr, ">> Error seeking to block %u offset %ld.\n", block_num, offset);
+            free(data_block);
+            result = -1;
+            break;
+        }
+
+        
+        if (fwrite(data_block, 1, len, file_out) != len) {
+             fprintf(stderr, ">> Error writing block %u to file.\n", block_num);
+             free(data_block);
+             result = -1;
+             break;
+        }
+        
+        
         free(data_block);
         received_blocks++;
 
@@ -337,9 +358,11 @@ int request_file(char *filename)
     }
 
     if (file_out) {
+        
         fclose(file_out);
         if (result == 0) {
             hashdata_t calculated_total_hash;
+            
             get_file_sha(full_file_path, calculated_total_hash, SHA256_HASH_SIZE);
             if (memcmp(calculated_total_hash, reply_h.total_hash, SHA256_HASH_SIZE) != 0) {
                 fprintf(stderr, ">> File hash mismatch for %s.\n", filename);
@@ -644,5 +667,5 @@ int main(int argc, char **argv)
         free(network);
     }
 
-    exit(EXIT_SUCCESS);
+    exit(EXIT_SUCCESS);          
 }
